@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin</title>
+    <style>
+        body {
+            font-family: system-ui, Arial;
+            margin: 16px
+        }
+
+        input,
+        button,
+        select {
+            padding: 6px 10px;
+            margin: 2px
+        }
+
+        .row {
+            margin: 8px 0
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Admin</h1>
+    <div class="row">
+        <label>Email <input id="email" value="admin@example.com"></label>
+        <label>Password <input id="pw" type="password" value="admin123"></label>
+        <button id="login">Login</button>
+    </div>
+    <div class="row"><label>Token <input id="tok" style="width:600px"></label></div>
+
+    <h2>Branches</h2>
+    <div class="row">
+        <input id="bname" placeholder="Branch name">
+        <button id="addBranch">Add Branch</button>
+    </div>
+    <ul id="branches"></ul>
+
+    <h2>Menu</h2>
+    <div class="row">
+        <input id="iname" placeholder="Name">
+        <input id="icat" placeholder="Category">
+        <input id="iprice" placeholder="Price cents" type="number">
+        <input id="ibranch" placeholder="Branch ID">
+        <input id="iaddons" placeholder="Add-ons (comma)">
+        <button id="addItem">Add Item</button>
+    </div>
+
+    <h2>Inventory</h2>
+    <div class="row">
+        <input id="inv_item" placeholder="Item ID">
+        <input id="inv_branch" placeholder="Branch ID">
+        <input id="inv_stock" placeholder="Stock" type="number">
+        <button id="setInv">Set/Push Stock</button>
+    </div>
+
+    <h2>Printer</h2>
+    <div class="row">
+        <input id="phost" placeholder="Printer host (e.g., 192.168.1.50)">
+        <input id="pport" placeholder="Port" value="9100" type="number">
+        <button id="savePrinter">Save</button>
+    </div>
+
+    <script>
+        let token = "";
+        const $ = s => document.querySelector(s);
+        async function api(p, opts = {}) {
+            opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+            if (token) opts.headers.Authorization = "Bearer " + token;
+            const r = await fetch(p, opts); if (!r.ok) throw new Error((await r.json()).error || "Request failed");
+            return r.json();
+        }
+        $("#login").onclick = async () => { const data = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email: $("#email").value, password: $("#pw").value }) }); token = data.token; $("#tok").value = token; load(); };
+        async function load() {
+            const branches = await api("/api/branches"); $("#branches").innerHTML = branches.map(b => `<li>${b.id} — ${b.name}</li>`).join("");
+        }
+        $("#addBranch").onclick = async () => { await api("/api/branches", { method: "POST", body: JSON.stringify({ name: $("#bname").value }) }); load(); };
+        $("#addItem").onclick = async () => {
+            const body = { name: $("#iname").value, category: $("#icat").value, price_cents: +$("#iprice").value, branch_id: $("#ibranch").value, add_on_options: ($("#iaddons").value || "").split(",").map(s => s.trim()).filter(Boolean) };
+            await api("/api/items", { method: "POST", body: JSON.stringify(body) }); alert("Item added");
+        };
+        $("#setInv").onclick = async () => {
+            const body = { item_id: $("#inv_item").value, branch_id: $("#inv_branch").value, stock: +$("#inv_stock").value };
+            await api("/api/inventory", { method: "POST", body: JSON.stringify(body) }); alert("Inventory updated");
+        };
+        $("#savePrinter").onclick = async () => {
+            await api("/api/settings", { method: "PUT", body: JSON.stringify({ printer: { host: $("#phost").value, port: +$("#pport").value } }) });
+            alert("Saved");
+        };
+    </script>
+</body>
+
+</html>

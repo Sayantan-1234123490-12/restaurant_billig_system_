@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QR Ordering</title>
+    <style>
+        body {
+            font-family: system-ui, Arial;
+            margin: 16px
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px
+        }
+
+        .card {
+            border: 1px solid #eee;
+            border-radius: 10px;
+            padding: 8px
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Order from your phone</h2>
+    <div>
+        <label>Branch <input id="branch"></label>
+        <label>Table <input id="table"></label>
+        <button id="start">Start</button>
+    </div>
+    <div id="menu" class="grid" style="margin-top:12px;"></div>
+    <div style="margin-top:12px;"><button id="submit">Submit Order</button></div>
+    <script>
+        const $ = s => document.querySelector(s), money = c => "₹" + (c / 100).toFixed(2);
+        let branch_id = "", table_id = "", items = [], cart = {};
+        $("#start").onclick = async () => {
+            branch_id = $("#branch").value.trim(); table_id = $("#table").value.trim();
+            items = await (await fetch(`/api/items?branch_id=${branch_id}`)).json();
+            const m = $("#menu"); m.innerHTML = "";
+            items.forEach(it => {
+                const d = document.createElement("div"); d.className = "card";
+                d.innerHTML = `<div><b>${it.name}</b></div><div>${it.category}</div><div>${money(it.price_cents)}</div><div><button>Add</button></div>`;
+                d.querySelector("button").onclick = () => { cart[it.id] = (cart[it.id] || 0) + 1; };
+                m.appendChild(d);
+            });
+        };
+        $("#submit").onclick = async () => {
+            if (!branch_id) return alert("Start first");
+            const o = await (await fetch("/api/orders", { method: "POST", headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ table_id, order_type: "DINE_IN", branch_id }) })).json();
+            for (const [id, qty] of Object.entries(cart)) {
+                await fetch(`/api/orders/${o.id}/items`, { method: "POST", headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item_id: id, qty }) });
+            }
+            await fetch(`/api/orders/${o.id}/kot`, { method: "POST" });
+            alert("Order sent! Thank you."); cart = {};
+        };
+    </script>
+</body>
+
+</html>

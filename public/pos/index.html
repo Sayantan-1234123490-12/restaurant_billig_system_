@@ -1,0 +1,365 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>POS</title>
+    <link rel="manifest" href="/pos/manifest.json">
+    <style>
+        body {
+            font-family: system-ui, Arial;
+            margin: 12px;
+            background: #fafafa
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px
+        }
+
+        .menu {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            max-height: 360px;
+            overflow: auto
+        }
+
+        button {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            background: #fff;
+            cursor: pointer
+        }
+
+        button.primary {
+            background: #111827;
+            color: #fff;
+            border-color: #111827
+        }
+
+        .pill {
+            padding: 6px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 9999px;
+            margin: 2px;
+            display: inline-block
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px dashed #eee;
+            align-items: center
+        }
+
+        .muted {
+            color: #6b7280;
+            font-size: 12px
+        }
+
+        input,
+        select {
+            padding: 6px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px
+        }
+
+        .status {
+            font-weight: 600
+        }
+
+        .VACANT {
+            color: #059669
+        }
+
+        .OCCUPIED {
+            color: #b45309
+        }
+
+        .RESERVED {
+            color: #1d4ed8
+        }
+    </style>
+</head>
+
+<body>
+    <h1>POS</h1>
+
+    <div class="card">
+        <button id="login">Login (admin)</button>
+        <span class="muted">Use seed: admin@example.com / admin123</span>
+        <div style="margin-top:8px">
+            <label>Branch <input id="branch" style="width:260px"></label>
+            <label style="margin-left:8px">Token <input id="tok" style="width:480px"></label>
+            <button id="clockIn">Clock-in</button><button id="clockOut">Clock-out</button>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Tables</h2>
+            <div id="tables"></div>
+            <div style="margin-top:6px">
+                <button id="merge">Merge</button>
+                <button id="split">Split</button>
+            </div>
+            <div style="margin-top:8px">
+                <button id="newOrder" class="primary">Create Order</button>
+                <span id="oid" class="muted"></span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Menu</h2>
+            <div>
+                <input id="search" placeholder="Search items">
+                <select id="cat">
+                    <option value="">All categories</option>
+                </select>
+            </div>
+            <div id="menu" class="menu" style="margin-top:8px;"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Cart / KOT</h2>
+        <div class="row">
+            <label>Discount
+                <select id="discType">
+                    <option value="">None</option>
+                    <option value="FLAT">Flat</option>
+                    <option value="PERCENT">Percent</option>
+                </select>
+                <input id="discVal" type="number" value="0" style="width:90px">
+            </label>
+            <label>Order Type
+                <select id="otype">
+                    <option>DINE_IN</option>
+                    <option>TAKEAWAY</option>
+                    <option>DELIVERY</option>
+                </select>
+            </label>
+            <label>Notes <input id="onotes" style="width:260px"></label>
+        </div>
+        <div id="cart"></div>
+        <div id="totals" style="margin-top:6px"></div>
+        <div style="margin-top:8px">
+            <button id="kotAll">KOT (All)</button>
+            <button id="kotFood">KOT (Food)</button>
+            <button id="kotDrinks">KOT (Drinks)</button>
+            <button id="share">Share (WhatsApp)</button>
+            <button id="printNet">Network Print</button>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Split Payments</h2>
+            <div class="row">
+                <select id="pmethod">
+                    <option>CASH</option>
+                    <option>CARD</option>
+                    <option>UPI</option>
+                    <option>WALLET</option>
+                </select>
+                <input id="pamount" type="number" placeholder="Amount (cents)" style="width:160px">
+                <button id="addPayment">Add Payment</button>
+            </div>
+            <ul id="payments"></ul>
+        </div>
+        <div class="card">
+            <h2>Reports</h2>
+            <ul id="sales"></ul>
+            <ol id="best"></ol>
+        </div>
+    </div>
+
+    <script>
+        // --- helpers ---
+        const $ = s => document.querySelector(s);
+        const el = (t, p = {}, c = []) => { const e = document.createElement(t); Object.assign(e, p); if (p.className) e.className = p.className; (c || []).forEach(x => e.appendChild(typeof x === "string" ? document.createTextNode(x) : x)); return e; }
+        const money = c => "₹" + (c / 100).toFixed(2);
+        const api = async (path, opts = {}) => {
+            opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+            if (state.token) opts.headers.Authorization = "Bearer " + state.token;
+            try {
+                const r = await fetch(path, opts);
+                if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+                return await r.json();
+            } catch (e) {
+                // offline queue for POST/PUT
+                if ((opts.method || "GET") !== "GET") {
+                    queue.push({ path, opts }); localStorage.setItem("posQueue", JSON.stringify(queue));
+                    throw new Error("Queued offline");
+                }
+                throw e;
+            }
+        };
+        let queue = JSON.parse(localStorage.getItem("posQueue") || "[]");
+        window.addEventListener("online", async () => {
+            const q = [...queue]; queue = [];
+            for (const job of q) {
+                try { await fetch(job.path, job.opts); } catch { queue.push(job); }
+            }
+            localStorage.setItem("posQueue", JSON.stringify(queue));
+        });
+
+        // --- state ---
+        const state = { token: "", branch_id: "", tables: [], items: [], cart: [], orderId: null, payments: [] };
+
+        function renderTables() {
+            const wrap = $("#tables"); wrap.innerHTML = "";
+            state.tables.forEach(t => {
+                const b = el("button", { innerText: `${t.name} • `, className: "pill " + (t.status || "VACANT") });
+                const st = el("span", { innerText: t.status, className: "status " + (t.status || "VACANT") });
+                b.appendChild(st); b.onclick = () => state.selTable = t;
+                wrap.appendChild(b);
+            });
+        }
+        function renderMenu() {
+            const m = $("#menu"); m.innerHTML = "";
+            const catSel = $("#cat").value, q = $("#search").value.toLowerCase();
+            const cats = new Set(state.items.map(i => i.category));
+            $("#cat").innerHTML = `<option value="">All categories</option>` + [...cats].map(c => `<option>${c}</option>`).join("");
+            state.items
+                .filter(i => !catSel || i.category === catSel)
+                .filter(i => (i.name + i.category).toLowerCase().includes(q))
+                .forEach(it => {
+                    const card = el("div", { className: "card" }, [
+                        el("div", { innerText: it.name, style: "font-weight:600" }),
+                        el("div", { innerText: it.category, className: "muted" }),
+                        el("div", { innerText: money(it.price_cents), className: "muted" }),
+                        el("div", {}, [
+                            el("input", { placeholder: "Qty", type: "number", value: 1, style: "width:70px", id: `qty-${it.id}` }),
+                            el("input", { placeholder: "Add-ons (comma)", style: "margin-left:6px;width:160px", id: `addons-${it.id}` }),
+                            el("input", { placeholder: "Notes", style: "margin-left:6px;width:160px", id: `notes-${it.id}` }),
+                            el("button", { innerText: "Add", style: "margin-left:6px", onclick: () => addToCart(it) })
+                        ])
+                    ]);
+                    m.appendChild(card);
+                });
+        }
+        function addToCart(it) {
+            const qty = +($("#qty-" + it.id).value || 1);
+            const add_ons = ($("#addons-" + it.id).value || "").split(",").map(s => s.trim()).filter(Boolean);
+            const notes = $("#notes-" + it.id).value || "";
+            const ex = state.cart.find(c => c.id === it.id && c.notes === notes && JSON.stringify(c.add_ons) === JSON.stringify(add_ons));
+            if (ex) ex.qty += qty; else state.cart.push({ ...it, qty, add_ons, notes });
+            renderCart();
+        }
+        function renderCart() {
+            const c = $("#cart"); c.innerHTML = "";
+            if (state.cart.length === 0) { c.innerText = "No items yet."; $("#totals").innerHTML = ""; return; }
+            state.cart.forEach((it, idx) => {
+                c.appendChild(el("div", { className: "row" }, [
+                    el("div", { innerText: `${it.name} × ${it.qty}${it.add_ons.length ? ` [${it.add_ons.join("+")}]` : ""}` }),
+                    el("div", { innerText: money(it.price_cents * it.qty) }),
+                    el("button", { innerText: "-1", onclick: () => { it.qty = Math.max(0, it.qty - 1); if (!it.qty) state.cart.splice(idx, 1); renderCart(); } })
+                ]));
+            });
+            const sub = state.cart.reduce((s, i) => s + i.price_cents * i.qty, 0);
+            const discType = $("#discType").value, discVal = +$("#discVal").value || 0;
+            let disc = 0; if (discType === "FLAT") disc = discVal * 100; if (discType === "PERCENT") disc = Math.round(sub * (discVal / 100));
+            const gstRate = 5; const tax = Math.round(Math.max(0, sub - disc) * gstRate / 100);
+            const tot = Math.max(0, sub - disc) + tax;
+            $("#totals").innerHTML = `Subtotal: <b>${money(sub)}</b> &nbsp; Discount: <b>-${money(disc)}</b> &nbsp; GST(5%): <b>${money(tax)}</b> &nbsp; Total: <b>${money(tot)}</b>`;
+        }
+        function renderPayments() {
+            $("#payments").innerHTML = state.payments.map(p => `<li>${p.method}: ${money(p.amount_cents)}</li>`).join("");
+        }
+
+        async function login() {
+            const email = prompt("Email", "admin@example.com");
+            const password = prompt("Password", "admin123");
+            const data = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+            state.token = data.token; $("#tok").value = state.token; state.branch_id = data.branch_id; $("#branch").value = state.branch_id;
+            await loadAll();
+        }
+        async function loadAll() {
+            state.items = await api(`/api/items?branch_id=${state.branch_id}`);
+            state.tables = await api(`/api/tables?branch_id=${state.branch_id}`);
+            renderTables(); renderMenu();
+            const sales = await api("/api/reports/sales"); $("#sales").innerHTML = sales.map(r => `<li>${r.day}: ${money(r.revenue_cents)}</li>`).join("");
+            const best = await api("/api/reports/bestsellers"); $("#best").innerHTML = best.map(b => `<li>${b.name} — ${b.qty_sold}</li>`).join("");
+        }
+        async function createOrder() {
+            const body = { table_id: (state.selTable && state.selTable.id) || null, order_type: $("#otype").value, branch_id: state.branch_id, discount_type: $("#discType").value || null, discount_value: +$("#discVal").value || 0, notes: $("#onotes").value };
+            try {
+                const o = await api("/api/orders", { method: "POST", body: JSON.stringify(body) });
+                state.orderId = o.id; $("#oid").innerText = "Order: " + state.orderId;
+            } catch (e) { alert(e.message); }
+        }
+        async function kot(section) {
+            if (!state.orderId) return alert("Create order first");
+            for (const it of state.cart) {
+                await api(`/api/orders/${state.orderId}/items`, { method: "POST", body: JSON.stringify({ item_id: it.id, qty: it.qty, add_ons: it.add_ons, notes: it.notes }) }).catch(() => { });
+            }
+            await api(`/api/orders/${state.orderId}/kot?section=${section}`, { method: "POST" }).catch(() => { });
+            alert("KOT queued/sent"); state.cart = []; renderCart();
+        }
+        async function share() {
+            if (!state.orderId) return alert("Create order first");
+            const data = await api(`/api/orders/${state.orderId}/share`);
+            window.open(data.whatsapp_url, "_blank");
+        }
+        async function printNet() {
+            if (!state.orderId) return alert("Create order first");
+            try { await api(`/api/print/invoice/${state.orderId}`, { method: "POST" }); alert("Sent to network printer"); }
+            catch (e) { alert(e.message); }
+        }
+        async function addPayment() {
+            if (!state.orderId) return alert("Create order first");
+            const method = $("#pmethod").value;
+            const amount_cents = +$("#pamount").value || 0;
+            const p = await api(`/api/orders/${state.orderId}/payments`, { method: "POST", body: JSON.stringify({ method, amount_cents }) });
+            state.payments.push(p); renderPayments();
+        }
+        async function mergeTables() {
+            const p = prompt("Merge SECOND table into currently selected (enter other table name)"); if (!p || !state.selTable) return;
+            const other = state.tables.find(t => t.name === p); if (!other) return alert("Not found");
+            await api("/api/tables/merge", { method: "POST", body: JSON.stringify({ primary_id: state.selTable.id, merge_id: other.id }) });
+            alert("Merged");
+        }
+        async function splitTables() {
+            const id = prompt("Enter Merge Group ID to split"); if (!id) return;
+            await api("/api/tables/split", { method: "POST", body: JSON.stringify({ group_id: id }) }); alert("Split requested");
+        }
+        async function clock(type) {
+            try { await api(`/api/attendance/clock${type}`.toLowerCase(), { method: "POST" }); alert(`Clock-${type} recorded`); }
+            catch (e) { alert(e.message); }
+        }
+
+        // events
+        $("#login").onclick = login;
+        $("#newOrder").onclick = createOrder;
+        $("#kotAll").onclick = () => kot("ALL");
+        $("#kotFood").onclick = () => kot("FOOD");
+        $("#kotDrinks").onclick = () => kot("DRINKS");
+        $("#share").onclick = share;
+        $("#printNet").onclick = printNet;
+        $("#addPayment").onclick = addPayment;
+        $("#merge").onclick = mergeTables;
+        $("#split").onclick = splitTables;
+        $("#search").oninput = renderMenu; $("#cat").onchange = renderMenu;
+        $("#clockIn").onclick = () => clock("In"); $("#clockOut").onclick = () => clock("Out");
+
+        // PWA
+        if ("serviceWorker" in navigator) { navigator.serviceWorker.register("/pos/sw.js"); }
+    </script>
+</body>
+
+</html>
